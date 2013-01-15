@@ -9,7 +9,7 @@
     { "name": "Christoph Dorn", "web": "https://github.com/cadorn" }
   ],
   "dependencies": {
-    "ws": "0.4.20",
+    "ws": "git://github.com/ruxkor/ws.git",
     "xmlhttprequest": "1.5.0",
     "emitter-component": "0.0.6",
     "debug": "0.6.0"
