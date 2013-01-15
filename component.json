@@ -1,5 +1,5 @@
 {
-  "name": "engine.io",
+  "name": "engine.io-client",
   "version": "0.6.3",
   "dependencies": {
     "component/emitter": "1.0.0",
