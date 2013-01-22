@@ -35,5 +35,8 @@
       "engine.io/transports/websocket.js": "lib/transports/websocket.js",
       "engine.io/transports/flashsocket.js": "lib/transports/flashsocket.js"
     }
+  },
+  "scripts": {
+    "test": "make test"
   }
 }
