@@ -64,7 +64,6 @@ require.aliases = {};
 
 require.resolve = function(path) {
   if (path.charAt(0) === '/') path = path.slice(1);
-  var index = path + '/index.js';
 
   var paths = [
     path,
@@ -77,10 +76,7 @@ require.resolve = function(path) {
   for (var i = 0; i < paths.length; i++) {
     var path = paths[i];
     if (require.modules.hasOwnProperty(path)) return path;
-  }
-
-  if (require.aliases.hasOwnProperty(index)) {
-    return require.aliases[index];
+    if (require.aliases.hasOwnProperty(path)) return require.aliases[path];
   }
 };
 
@@ -563,7 +559,7 @@ module.exports = Object.keys || function keys (obj){
 };
 
 });
-require.register("visionmedia-debug/index.js", function(exports, require, module){
+require.register("tuco86-debug/index.js", function(exports, require, module){
 if ('undefined' == typeof window) {
   module.exports = require('./lib/debug');
 } else {
@@ -571,7 +567,7 @@ if ('undefined' == typeof window) {
 }
 
 });
-require.register("visionmedia-debug/debug.js", function(exports, require, module){
+require.register("tuco86-debug/debug.js", function(exports, require, module){
 
 /**
  * Expose `debug()` as the module.
@@ -607,7 +603,45 @@ function debug(name) {
     window.console
       && console.log
       && Function.prototype.apply.call(console.log, console, arguments);
+
+    // Call back everything in debug.cb_log
+    for(var i = 0; i < debug.cb_log.length; i++) {
+        debug.cb_log[i].fn.apply(debug.cb_log[i].bind ? debug.cb_log[i].bind : window, arguments);
+    }
   }
+}
+
+/**
+ * Callbacks for logging
+ */
+
+debug.cb_log = [];
+
+/**
+ * Registers a callback function and an optional object to apply to.
+ *
+ * @param {Function} fn
+ * @param {Object} bind
+ * @return {Object}
+ * @api public
+ */
+
+debug.cb_log.register = function(fn, bind){
+    var cb_log = {fn: fn, bind: bind};
+    this.push(cb_log);
+    return cb_log;
+}
+
+/**
+ * Unregister a callback object.
+ *
+ * @param {Object} cb_log
+ * @api public
+ */
+
+debug.cb_log.unregister = function(cb_log){
+    var idx = this.indexOf(cb_log);
+    if(idx!=-1) this.splice(idx, 1);
 }
 
 /**
@@ -706,10 +740,12 @@ function coerce(val) {
 
 // persist
 
-if (window.localStorage) debug.enable(localStorage.debug);
+try {
+  if (window.localStorage) debug.enable(localStorage.debug);
+} catch(e){}
 
 });
-require.register("engine.io/lib/index.js", function(exports, require, module){
+require.register("engine.io-client/lib/index.js", function(exports, require, module){
 
 module.exports = require('./socket');
 
@@ -722,7 +758,7 @@ module.exports = require('./socket');
 module.exports.parser = require('engine.io-parser');
 
 });
-require.register("engine.io/lib/socket.js", function(exports, require, module){
+require.register("engine.io-client/lib/socket.js", function(exports, require, module){
 /**
  * Module dependencies.
  */
@@ -1070,7 +1106,7 @@ Socket.prototype.onPacket = function (packet) {
         break;
 
       case 'pong':
-        this.setPing();
+        this.ping();
         break;
 
       case 'error':
@@ -1109,7 +1145,7 @@ Socket.prototype.onHandshake = function (data) {
   this.pingInterval = data.pingInterval;
   this.pingTimeout = data.pingTimeout;
   this.onOpen();
-  this.setPing();
+  this.ping();
 
   // Prolong liveness of socket on heartbeat
   this.removeListener('heartbeat', this.onHeartbeat);
@@ -1138,53 +1174,50 @@ Socket.prototype.onHeartbeat = function (timeout) {
  * @api private
  */
 
-Socket.prototype.setPing = function () {
+Socket.prototype.ping = function () {
   var self = this;
   clearTimeout(self.pingIntervalTimer);
   self.pingIntervalTimer = setTimeout(function () {
     debug('writing ping packet - expecting pong within %sms', self.pingTimeout);
-    self.ping();
+    self.sendPacket('ping');
     self.onHeartbeat(self.pingTimeout);
   }, self.pingInterval);
 };
 
 /**
-* Sends a ping packet.
-*
-* @api public
-*/
-
-Socket.prototype.ping = function () {
-  this.sendPacket('ping');
-};
-
-/**
  * Called on `drain` event
- *
+ * 
  * @api private
  */
 
  Socket.prototype.onDrain = function() {
-  for (var i = 0; i < this.prevBufferLen; i++) {
-    if (this.callbackBuffer[i]) {
-      this.callbackBuffer[i]();
-    }
-  }
-
+  this.callbacks();
   this.writeBuffer.splice(0, this.prevBufferLen);
   this.callbackBuffer.splice(0, this.prevBufferLen);
-
   // setting prevBufferLen = 0 is very important
   // for example, when upgrading, upgrade packet is sent over,
   // and a nonzero prevBufferLen could cause problems on `drain`
   this.prevBufferLen = 0;
-
   if (this.writeBuffer.length == 0) {
     this.emit('drain');
   } else {
     this.flush();
   }
-};
+ }
+
+/**
+ * Calls all the callback functions associated with sending packets
+ * 
+ * @api private
+ */
+
+Socket.prototype.callbacks = function() {
+  for (var i = 0; i < this.prevBufferLen; i++) {
+    if (this.callbackBuffer[i]) {
+      this.callbackBuffer[i]();
+    }
+  }
+}
 
 /**
  * Flush write buffers.
@@ -1279,14 +1312,13 @@ Socket.prototype.onClose = function (reason, desc) {
     // clear timers
     clearTimeout(this.pingIntervalTimer);
     clearTimeout(this.pingTimeoutTimer);
-
+    desc = desc || {transport: this.transport.name};
     // clean buffers in next tick, so developers can still
     // grab the buffers on `close` event
     setTimeout(function() {
       self.writeBuffer = [];
       self.callbackBuffer = [];
     }, 0);
-
     // ignore further transport communication
     this.transport.removeAllListeners();
 
@@ -1322,7 +1354,7 @@ Socket.prototype.filterUpgrades = function (upgrades) {
 };
 
 });
-require.register("engine.io/lib/transport.js", function(exports, require, module){
+require.register("engine.io-client/lib/transport.js", function(exports, require, module){
 
 /**
  * Module dependencies.
@@ -1374,6 +1406,7 @@ Transport.prototype.onError = function (msg, desc) {
   var err = new Error(msg);
   err.type = 'TransportError';
   err.description = desc;
+  err.transport = this.name;
   this.emit('error', err);
   return this;
 };
@@ -1466,7 +1499,7 @@ Transport.prototype.onClose = function () {
 };
 
 });
-require.register("engine.io/lib/emitter.js", function(exports, require, module){
+require.register("engine.io-client/lib/emitter.js", function(exports, require, module){
 
 /**
  * Module dependencies.
@@ -1505,7 +1538,7 @@ Emitter.prototype.removeEventListener = Emitter.prototype.off;
 Emitter.prototype.removeListener = Emitter.prototype.off;
 
 });
-require.register("engine.io/lib/util.js", function(exports, require, module){
+require.register("engine.io-client/lib/util.js", function(exports, require, module){
 /**
  * Status of page load.
  */
@@ -1797,7 +1830,7 @@ exports.qsParse = function(qs){
 };
 
 });
-require.register("engine.io/lib/transports/index.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/index.js", function(exports, require, module){
 
 /**
  * Module dependencies
@@ -1862,7 +1895,7 @@ function polling (opts) {
 };
 
 });
-require.register("engine.io/lib/transports/polling.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/polling.js", function(exports, require, module){
 /**
  * Module dependencies.
  */
@@ -1984,7 +2017,6 @@ Polling.prototype.poll = function(){
 Polling.prototype.onData = function(data){
   var self = this;
   debug('polling got data %s', data);
-
   // decode payload
   parser.decodePayload(data, function(packet, index, total) {
     // if its the first message we consider the transport open
@@ -2004,14 +2036,14 @@ Polling.prototype.onData = function(data){
 
   // if an event did not trigger closing
   if ('closed' != this.readyState) {
-    // if we got data we're not polling
-    this.polling = false;
-    this.emit('pollComplete');
+  // if we got data we're not polling
+  this.polling = false;
+  this.emit('pollComplete');
 
-    if ('open' == this.readyState) {
-      this.poll();
-    } else {
-      debug('ignoring poll - transport state "%s"', this.readyState);
+  if ('open' == this.readyState) {
+    this.poll();
+  } else {
+    debug('ignoring poll - transport state "%s"', this.readyState);
     }
   }
 };
@@ -2030,13 +2062,13 @@ Polling.prototype.doClose = function(){
     self.write([{ type: 'close' }]);
   }
 
-  if (this.open) {
+  if ('open' == this.readyState) {
     debug('transport open - closing');
     close();
   } else {
     // in case we're trying to close while
     // handshaking is in progress (GH-164)
-    debug('transport not open - defering close');
+    debug('transport not open - deferring close');
     this.once('open', close);
   }
 };
@@ -2070,9 +2102,8 @@ Polling.prototype.uri = function(){
   var port = '';
 
   // cache busting is forced for IE / android / iOS6 ಠ_ಠ
-  if (global.ActiveXObject || util.ua.android || util.ua.ios6 ||
-      this.timestampRequests) {
-    query[this.timestampParam] = +new Date;
+  if (this.needsCacheBusting()) {
+    this.addTimestamp(query);
   }
 
   query = util.qs(query);
@@ -2091,8 +2122,35 @@ Polling.prototype.uri = function(){
   return schema + '://' + this.hostname + port + this.path + query;
 };
 
+/**
+ * Adds a this.timestampParam attribute, containing a timestamp.
+ *
+ * @param object The query object to be modified in-place
+ */
+
+Polling.prototype.addTimestamp = function(query) {
+  query[this.timestampParam] = +new Date;
+};
+
+/**
+ * Checks if the client needs cache busting.
+ *
+ * @api private
+ *
+ * @return boolean
+ */
+
+Polling.prototype.needsCacheBusting = function() {
+  return (
+      global.ActiveXObject 
+   || util.ua.android
+   || util.ua.ios6
+   || this.timestampRequests
+  ) ? true : false;
+};
+
 });
-require.register("engine.io/lib/transports/polling-xhr.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/polling-xhr.js", function(exports, require, module){
 /**
  * Module requirements.
  */
@@ -2157,19 +2215,6 @@ function XHR(opts){
  */
 
 util.inherits(XHR, Polling);
-
-/**
- * Opens the socket
- *
- * @api private
- */
-
-XHR.prototype.doOpen = function(){
-  var self = this;
-  util.defer(function(){
-    Polling.prototype.doOpen.call(self);
-  });
-};
 
 /**
  * Creates a request.
@@ -2395,7 +2440,7 @@ if (xobject) {
 }
 
 });
-require.register("engine.io/lib/transports/polling-jsonp.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/polling-jsonp.js", function(exports, require, module){
 
 /**
  * Module requirements.
@@ -2476,19 +2521,6 @@ function JSONPPolling (opts) {
  */
 
 util.inherits(JSONPPolling, Polling);
-
-/**
- * Opens the socket.
- *
- * @api private
- */
-
-JSONPPolling.prototype.doOpen = function () {
-  var self = this;
-  util.defer(function () {
-    Polling.prototype.doOpen.call(self);
-  });
-};
 
 /**
  * Closes the socket
@@ -2630,7 +2662,7 @@ JSONPPolling.prototype.doWrite = function (data, fn) {
 };
 
 });
-require.register("engine.io/lib/transports/websocket.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/websocket.js", function(exports, require, module){
 /**
  * Module dependencies.
  */
@@ -2840,7 +2872,7 @@ function ws(){
 }
 
 });
-require.register("engine.io/lib/transports/flashsocket.js", function(exports, require, module){
+require.register("engine.io-client/lib/transports/flashsocket.js", function(exports, require, module){
 /**
  * Module dependencies.
  */
@@ -3102,28 +3134,28 @@ function load (arr, fn) {
 };
 
 });
-require.alias("component-emitter/index.js", "engine.io/deps/emitter/index.js");
+require.alias("component-emitter/index.js", "engine.io-client/deps/emitter/index.js");
 require.alias("component-emitter/index.js", "emitter/index.js");
 
-require.alias("component-indexof/index.js", "engine.io/deps/indexof/index.js");
+require.alias("component-indexof/index.js", "engine.io-client/deps/indexof/index.js");
 require.alias("component-indexof/index.js", "indexof/index.js");
 
-require.alias("LearnBoost-engine.io-protocol/lib/index.js", "engine.io/deps/engine.io-parser/lib/index.js");
-require.alias("LearnBoost-engine.io-protocol/lib/keys.js", "engine.io/deps/engine.io-parser/lib/keys.js");
-require.alias("LearnBoost-engine.io-protocol/lib/index.js", "engine.io/deps/engine.io-parser/index.js");
+require.alias("LearnBoost-engine.io-protocol/lib/index.js", "engine.io-client/deps/engine.io-parser/lib/index.js");
+require.alias("LearnBoost-engine.io-protocol/lib/keys.js", "engine.io-client/deps/engine.io-parser/lib/keys.js");
+require.alias("LearnBoost-engine.io-protocol/lib/index.js", "engine.io-client/deps/engine.io-parser/index.js");
 require.alias("LearnBoost-engine.io-protocol/lib/index.js", "engine.io-parser/index.js");
 require.alias("LearnBoost-engine.io-protocol/lib/index.js", "LearnBoost-engine.io-protocol/index.js");
 
-require.alias("visionmedia-debug/index.js", "engine.io/deps/debug/index.js");
-require.alias("visionmedia-debug/debug.js", "engine.io/deps/debug/debug.js");
-require.alias("visionmedia-debug/index.js", "debug/index.js");
+require.alias("tuco86-debug/index.js", "engine.io-client/deps/debug/index.js");
+require.alias("tuco86-debug/debug.js", "engine.io-client/deps/debug/debug.js");
+require.alias("tuco86-debug/index.js", "debug/index.js");
 
-require.alias("engine.io/lib/index.js", "engine.io/index.js");
+require.alias("engine.io-client/lib/index.js", "engine.io-client/index.js");
 
 if (typeof exports == "object") {
-  module.exports = require("engine.io");
+  module.exports = require("engine.io-client");
 } else if (typeof define == "function" && define.amd) {
-  define(function(){ return require("engine.io"); });
+  define(function(){ return require("engine.io-client"); });
 } else {
-  this["eio"] = require("engine.io");
+  this["eio"] = require("engine.io-client");
 }})();
